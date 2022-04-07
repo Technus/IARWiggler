@@ -1,0 +1,230 @@
+package comg.github.technus.iarWiggler;
+
+import comg.github.technus.iarWiggler.xml.UtilXML;
+import comg.github.technus.iarWiggler.xml.bindings.*;
+import lombok.Getter;
+import lombok.ToString;
+import reactor.util.function.Tuple2;
+import reactor.util.function.Tuples;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
+import java.nio.file.FileVisitor;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+@ToString
+@Getter
+public class IARModel {
+    private Project project;
+
+    private Map<String, Configuration> globalConfigurations=new HashMap<>();
+    private List<Tuple2<File,Configuration>> localConfigurations=new ArrayList<>();
+
+    private Set<String> valuesConfiguration=new HashSet<>();
+    private Set<String> valuesExclusions=new HashSet<>();
+
+    private Set<String> valuesData=new HashSet<>();
+    private Map<String,HashSet<String>> statesDefines=new HashMap<>();
+
+    private Map<String, Group> groupHashMap=new HashMap<>();
+    private Map<String, comg.github.technus.iarWiggler.xml.bindings.File> fileHashMap=new HashMap<>();
+
+    public IARModel(Path path) {
+        this.project = UtilXML.unmarshallFile(path,Project.class);
+
+        project.configurations.forEach(configuration -> {
+            globalConfigurations.put(configuration.name, configuration);
+            valuesConfiguration.stream()
+                    .filter(v->!v.startsWith("\n"))
+                    .forEach(valuesConfiguration::add);
+            configuration.settings.stream()
+                    .flatMap(settings -> {
+                        settings.data.options
+                                .forEach(option -> statesDefines.compute(option.name,(k, v)->{
+                                    if(v==null){
+                                        v=new HashSet<>();
+                                    }
+                                    v.addAll(option.state);
+                                    return v;
+                                }));
+                        return settings.data.value.stream();
+                    })
+                    .filter(Objects::nonNull)
+                    .forEach(valuesData::add);
+        });
+
+        project.groups.stream()
+                .flatMap(Group::flatten)
+                .filter(group -> {
+                    if (groupHashMap.put(group.path(), group) != null) System.out.println("duplicate group: "+group.path());
+                    return true;
+                })
+                .flatMap(group -> Stream.concat(Stream.of(group),group.files.stream()))//File and group stream
+                .filter(file -> {
+                    file.configurations.stream()
+                            .flatMap(configuration -> configuration.value.stream())
+                            .filter(Objects::nonNull)
+                            .forEach(valuesConfiguration::add);
+                    if(file.exclusions != null)file.exclusions.configurations.stream()
+                            .flatMap(configuration -> configuration.value.stream())
+                            .filter(Objects::nonNull)
+                            .forEach(valuesExclusions::add);
+                    return true;
+                })
+                .filter(file -> {
+                    file.configurations.forEach(configuration -> {
+                        localConfigurations.add(Tuples.of(file,configuration));
+                        configuration.settings.stream()
+                                .flatMap(settings -> {
+                                    settings.data.options
+                                            .forEach(option -> statesDefines.compute(option.name,(k, v)->{
+                                                if(v==null){
+                                                    v=new HashSet<>();
+                                                }
+                                                v.addAll(option.state);
+                                                return v;
+                                            }));
+                                    return settings.data.value.stream();
+                                })
+                                .filter(Objects::nonNull)
+                                .forEach(valuesData::add);
+                    });
+                    return !(file instanceof Group);
+                })
+                .forEach(file -> {//only files
+                    comg.github.technus.iarWiggler.xml.bindings.File put = fileHashMap.put(file.name, file);
+                    if (put != null) System.out.println("duplicate file: "+file.name+" "+put.name);
+                });
+
+        StringWriter sw=new StringWriter();
+        PrintWriter pw=new PrintWriter(sw);
+        pw.println("Auto Generated By @DAPC Script");
+        localConfigurations.forEach(tuple -> {
+            Configuration configuration=tuple.getT2();
+            comg.github.technus.iarWiggler.xml.bindings.File file=tuple.getT1();
+
+            pw.println();
+            pw.println();
+            pw.println();
+            pw.println("File: "+file.name);
+            pw.println("Configuration: "+ configuration.name);
+            pw.println("Marshalled local configuration:");
+            pw.println(marshall(configuration));
+            pw.println("Versus global diff:");
+            Configuration globalConfiguration=globalConfigurations.get(configuration.name);
+            configuration.settings.forEach(settings -> {
+                pw.println("    "+settings.name);
+                final Settings globalSettings = globalConfiguration.settings.stream()
+                        .filter(s -> s.name.equals(settings.name))
+                        .findFirst()
+                        .orElse(null);
+
+                final Data data = settings.data;
+                final Data globalData = globalSettings.data;
+
+                final Set<String> collect = data.options.stream().map(option -> option.name).collect(Collectors.toSet());
+                final Set<String> globalCollect = globalData.options.stream().map(option -> option.name).collect(Collectors.toSet());
+
+                if(collect.size() != globalCollect.size() || !globalCollect.containsAll(collect)){
+                    final Set<String> extra = collect.stream().filter(o -> !globalCollect.contains(o)).collect(Collectors.toSet());
+                    final Set<String> extraGlobals = globalCollect.stream().filter(o -> !collect.contains(o)).collect(Collectors.toSet());
+                    if(extra.size()>0){
+                        pw.println("    "+"    "+"extras: ");
+                        extra.forEach(e-> data.options.stream().filter(d->d.name.equals(e)).forEach(d->
+                                pw.println("    "+"    "+"    "+d.name+ ": "+Arrays.toString(d.state.toArray()))));
+                    }
+                    if(extraGlobals.size()>0){
+                        pw.println("    "+"    "+"globalExtras: ");
+                        extraGlobals.forEach(e-> globalData.options.stream().filter(d->d.name.equals(e)).forEach(d->
+                                pw.println("    "+"    "+"    "+d.name+ ": "+Arrays.toString(d.state.toArray()))));
+                    }
+                }
+
+                data.options.forEach(option -> {
+                    final Option globalOption = globalData.options.stream()
+                            .filter(o -> o.name.equals(option.name))
+                            .findFirst()
+                            .orElse(null);
+
+                    if(option.state.size() != globalOption.state.size() || !globalOption.state.containsAll(option.state)){
+                        final Set<String> extra = option.state.stream().filter(o -> !globalOption.state.contains(o)).collect(Collectors.toSet());
+                        final Set<String> extraGlobals = globalOption.state.stream().filter(o -> !option.state.contains(o)).collect(Collectors.toSet());
+                        if(extra.size()>0){
+                            pw.println("    "+"    "+option.name+" extras: "+Arrays.toString(extra.toArray()));
+                        }
+                        if(extraGlobals.size()>0){
+                            pw.println("    "+"    "+option.name+" globalExtras: "+Arrays.toString(extraGlobals.toArray()));
+                        }
+                    }
+                });
+            });
+        });
+        System.out.println(sw);
+        try {
+            Files.write(new java.io.File("./resource/IAR_diff.kindof.xml").toPath(),sw.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        Project rebult=unmarshall();//make clone of configurations
+        rebult.groups.clear();
+        rebult.files.clear();
+
+
+        java.io.File srcFolder=new java.io.File("C:\\Projects\\Brands\\Tremetrics\\Tremetrics_RA660\\src\\src");
+
+        Set<Path> headers=new HashSet<>();
+
+        try {
+            Files.walkFileTree(srcFolder.toPath(), new FileVisitor<Path>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                    Group g=new Group();
+
+                    g.name=dir.getFileName().toString();
+
+                    rebult.groups.add(g);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    if(file.toString().endsWith(".h")){
+                        headers.add(file);
+                    }
+
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        System.out.println("Headers: ");
+        headers.forEach(System.out::println);
+
+        System.out.println("Project Old: ");
+        System.out.println(project);
+
+        System.out.println("Project New: ");
+        System.out.println(rebult);
+    }
+}
