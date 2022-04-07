@@ -1,8 +1,6 @@
-package comg.github.technus.iarWiggler.xml;
+package com.github.technus.iarWiggler.xml;
 
-import comg.github.technus.iarWiggler.xml.bindings.Project;
 import lombok.SneakyThrows;
-import lombok.val;
 
 import javax.xml.bind.*;
 import javax.xml.bind.annotation.XmlRootElement;

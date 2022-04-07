@@ -1,6 +1,6 @@
-package comg.github.technus.iarWiggler.xml.bindings;
+package com.github.technus.iarWiggler.xml.bindings;
 
-import comg.github.technus.iarWiggler.xml.adapters.YeetAdapter;
+import com.github.technus.iarWiggler.xml.adapters.YeetAdapter;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
 

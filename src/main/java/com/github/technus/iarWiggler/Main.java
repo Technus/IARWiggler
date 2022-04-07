@@ -1,4 +1,4 @@
-package comg.github.technus.iarWiggler;
+package com.github.technus.iarWiggler;
 
 import lombok.SneakyThrows;
 import lombok.val;

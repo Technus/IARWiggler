@@ -1,4 +1,4 @@
-package comg.github.technus.iarWiggler.xml.bindings;
+package com.github.technus.iarWiggler.xml.bindings;
 
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
