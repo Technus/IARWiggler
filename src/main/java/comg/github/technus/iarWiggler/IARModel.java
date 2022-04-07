@@ -117,7 +117,7 @@ public class IARModel {
             pw.println("File: "+file.name);
             pw.println("Configuration: "+ configuration.name);
             pw.println("Marshalled local configuration:");
-            pw.println(marshall(configuration));
+            pw.println(UtilXML.marshallToString(configuration));
             pw.println("Versus global diff:");
             Configuration globalConfiguration=globalConfigurations.get(configuration.name);
             configuration.settings.forEach(settings -> {
@@ -174,7 +174,7 @@ public class IARModel {
             e.printStackTrace();
         }
 
-        Project rebult=unmarshall();//make clone of configurations
+        Project rebult=UtilXML.unmarshallFile(path,Project.class);//make clone of configurations
         rebult.groups.clear();
         rebult.files.clear();
 
